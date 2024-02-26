@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+	<head>
+<style>
+canvas {
+	width: 100vw;
+	height: 100vh;
+	background-color: #1e1e2e;
+}
+body {
+	margin: 0;
+}
+</style>
+	</head>
+	<body>
+		<canvas></canvas>
+<script>
+const canvas = document.getElementsByTagName("canvas")[0];
+const context = canvas.getContext("2d");
+
+let scale = 200;
+let offsetX = 0, offsetY = 0;
+
+const gridSize = 6;
+let grid = [];
+for (let i = 0;i < gridSize;i ++) {
+	grid[i] = [];
+	for (let j = 0;j < gridSize;j ++) grid[i][j] = Math.random() < 0.8 ? 0 : Math.floor(Math.random()*6)+1;
+}
+
+
+window.addEventListener("resize", resizeCanvas);
+window.addEventListener("load", resizeCanvas);
+function resizeCanvas() {
+	canvas.width = window.innerWidth * window.devicePixelRatio;
+	canvas.height = window.innerHeight * window.devicePixelRatio;
+	offsetX = (canvas.width - gridSize*scale) * .5;
+	offsetY = (canvas.height - gridSize*scale) * .5;
+}
+
+let mousex = -1, mousey = -1, mousedown = false;
+canvas.addEventListener("mousemove", ev => {
+	mousex = ev.x * window.devicePixelRatio - offsetX;
+	mousey = ev.y * window.devicePixelRatio - offsetY;
+});
+canvas.addEventListener("mousedown", _ => mousedown = true);
+canvas.addEventListener("mouseup",   _ => mousedown = false);
+
+const colors = {
+	fg: "#E3B505",
+	bg: "#9F84BD",
+};
+
+function getPossible(cx, cy) {
+	const possible = [];
+	for (const ox of [-1,0,+1]) {
+		for (const oy of [-1,0,+1]) {
+			if (ox == 0 && oy == 0) continue;
+			const jx = cx + ox, jy = cy + oy; // jumped over
+			const fx = jx + ox, fy = jy + oy; // final
+			if (jx < 0 || jx >= gridSize || jy < 0 || jy >= gridSize) continue;
+			if (fx < 0 || fx >= gridSize || fy < 0 || fy >= gridSize) continue;
+			if (grid[jx][jy] == 0) continue;
+			if (grid[fx][fy] != 0) continue;
+			possible.push({fx,fy,jx,jy});
+		}
+	}
+	return possible;
+}
+
+let held = null;
+
+function drawCursorInteraction(mgx, mgy) {
+	// context.clearRect(mgx*scale+1, mgy*scale+1, scale-2, scale-2);
+
+	context.save();
+	context.globalAlpha = mousedown ? 0.4 : 0.2;
+	context.fillStyle = colors.bg;
+	context.fillRect(mgx*scale, mgy*scale, scale, scale);
+	context.restore();
+
+	if (!held && mousedown && grid[mgx][mgy] != 0) { // Begin drag
+		held = {x: mgx, y: mgy};
+	}
+
+	if (!held) return;
+
+	const poss = getPossible(held.x, held.y);
+
+	context.fillStyle = colors.bg;
+	for (const {fx, fy} of poss) {
+		context.beginPath();
+		context.arc(fx*scale + scale*.5, fy*scale + scale*.5, scale*.15, 0, 2*Math.PI);
+		context.fill();
+	}
+	context.fillStyle = colors.fg;
+	context.font = scale * 1.1 + "px monospace";
+	context.fillText(grid[held.x][held.y], mousex, mousey);
+	context.globalAlpha = 1;
+
+	if (held && !mousedown) { // Release
+		const p = poss.find(p => (p.fx == mgx && p.fy == mgy));
+		if (p) { 
+			grid[p.jx][p.jy] --;
+			grid[p.fx][p.fy] = grid[held.x][held.y];
+			grid[held.x][held.y] = 0;
+		}
+		held = null;
+	}
+}
+
+function draw() {
+	context.clearRect(0, 0, canvas.width, canvas.height);
+	context.translate(offsetX, offsetY);
+
+	context.textBaseline = "middle";
+	context.textAlign = "center";
+
+	context.fillStyle = colors.fg;
+	context.strokeStyle = colors.bg;
+
+	const mgx = Math.floor(mousex / scale);
+	const mgy = Math.floor(mousey / scale);
+
+	for (let x = 0;x < gridSize;x ++) {
+		for (let y = 0;y < gridSize;y ++) {
+			context.strokeRect(x * scale, y * scale, scale, scale);
+			if (grid[x][y] == 0) continue;
+			if (held && held.x == x && held.y == y) continue;
+			context.font = scale + "px monospace";
+			context.fillText(grid[x][y], x * scale + scale*0.5, y * scale + scale*0.5);
+		}
+	}
+
+	// document.body.style.cursor = 'default';
+	if (mgx >= 0 && mgx < gridSize && mgy >= 0 && mgy < gridSize) drawCursorInteraction(mgx, mgy);
+	// document.body.style.cursor = 'pointer';
+	context.translate(-offsetX, -offsetY);
+
+	window.requestAnimationFrame(draw);
+}
+
+window.requestAnimationFrame(draw);
+
+</script>
+	</body>
+</html>
