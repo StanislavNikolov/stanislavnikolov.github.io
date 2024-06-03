@@ -1,0 +1,39 @@
+img, video {
+	width: 100%;
+}
+body {
+	max-width: 40rem;
+	margin-left: auto;
+	margin-right: auto;
+	font-family: sans-serif;
+	padding: 8px;
+}
+pre {
+	padding: 4px;
+	overflow-x: auto;
+}
+nav a {
+	margin-right: 16px;
+}
+nav {
+	border-bottom: 1px solid #4c4f69;
+}
+
+/* Light */
+body {
+	background-color: #eff1f5;
+	color: #4c4f69;
+}
+pre {
+	background-color: #dce0e8;
+}
+/* Dark */
+@media (prefers-color-scheme: dark) {
+    body {
+        background-color: #11111b;
+        color: #cdd6f4;
+    }
+	pre {
+		background-color: #1e1e2e;
+	}
+}
