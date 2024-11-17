@@ -22,7 +22,7 @@ nav {
 /* Light */
 body {
 	background-color: #eff1f5;
-	color: #4c4f69;
+	color: #36384a;
 }
 pre {
 	background-color: #dce0e8;
@@ -33,7 +33,7 @@ pre {
         background-color: #11111b;
         color: #cdd6f4;
     }
-	pre {
-		background-color: #1e1e2e;
-	}
+	pre { background-color: #1e1e2e; }
+	a         { color: #50b7f4; }
+	a:visited { color: #4c5cec; }
 }

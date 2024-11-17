@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>STML - tiny tensor library to run pytorch models</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/style.css">
+</head>
+
+<body>
+<nav>
+    <a href="/">Posts</a>
+    <a href="/about">About me</a>
+</nav>
+<h1><a href="https://github.com/StanislavNikolov/stml">STML</a> - tiny tensor library to run pytorch models</h1>
+
+<p>
+I wanted to use <a href="https://github.com/facebookresearch/sam2">SAM2</a> for a project, but I couldn't use my new favourite langugage <a href="https://odin-lang.org/">odin</a>, because sam is written in python and uses pytorch and god knows what other libraries. I cannot make it run in the browser, it takes forever to install, I need cuda and weird drivers, ugh. Imagine car manufacturers shipped a whole factory alongise the car itself when you buy one. It is wasteful and confusing for the user.
+</p>
+
+<p>
+I'm not the first person with this idea. 4-letter efforts like <a href="https://onnx.ai/">onnx</a> or <a href="https://github.com/ggerganov/ggml">ggml</a> already do that, but I wanted to do something like that myself. After all, when you look deep down in the couple thousand line source code, beneath all the image loading and device shuffling, it's just a bunch of tensor operations, right? As long as I can muliply and add numbers, I should be able to port any model to run anywhere.
+</p>
+
+<h2>(Bad) basic tensor operations</h2>
+<p>
+In pytorch, numpy and everything else I've seen, a tensor is an array of numbers and a shape telling you how to use them. For example, an image might be a tensor with shape (3,1024,1024), which can be understood as 3 channels (RGB), 1024 rows per channel and 1024 columns in each row. This can be implemented in odin the following way:
+</p>
+<pre>
+Tensor :: struct {
+    shape: []int,
+    data:  []f32,
+}
+</pre>
+Here <code>data</code> is a slice, a nice syntax for a structure with a pointer to some data and length. Operating with tensors will look like this:
+<pre>
+add :: proc(a, b: Tensor) -> Tensor {
+    out := Tensor {
+        shape = slice.clone(a.shape),
+        data = make([]f32, len(a.data))
+    }
+    for i in 0..&ltlen(a.data) {
+        out.data[i] = a.data[i] + b.data[i]
+    }
+    return out
+}
+</pre>
+Notice that the code above will brake if <code>len(a.data) != len(b.data)</code>. More complex operations like matrix multiplication actually need to verify the shapes itself.
+When can assert(), risk out of memory exceptions, or...
+
+<h2>Compile time tensor shape matching</h2>
+<p>
+You can add two images toghether as long as their shapes match. During runtime pytorch might throw an exception when it encounters incompatbile tenors. I <i>hate</i> that. I wish there was some way to catch while I'm writing the code, not while running. Let's use <a href="https://odin-lang.org/docs/overview/#data-types-using-explicit-parametric-polymorphism-parapoly">odin's parametric structures</a> to achieve that.
+</p>
+<pre>
+V :: struct($a: int)             { data: [a      ]f32 } // 1D - Vector
+M :: struct($a, $b: int)         { data: [a*b    ]f32 } // 2D - Matrix
+T :: struct($a, $b, $c: int)     { data: [a*b*c  ]f32 } // 3D - Tri
+Q :: struct($a, $b, $c, $d: int) { data: [a*b*c*d]f32 } // 4D - Quad
+</pre>
+The downside is that instead of a single struct "tensor", we have a struct for each dimentioness a tensor can be. We have a struct for vectors, a struct for matrices, etc. This looks ugly, but it turns out to be really usefull later on.
+Here's what <code>add</code> looks like:
+<pre>
+add_slice :: proc(a, b, o: []f32) { for i in 0..&ltlen(a) { o[i] = a[i] + b[i] } }
+add_v :: proc(a, b, o: ^V($x))    { add_slice(a.data[:], b.data[:], o.data[:]) }
+add_m :: proc(a, b, o: ^M($x,$y)) { add_slice(a.data[:], b.data[:], o.data[:]) }
+add :: proc{add_slice, add_v, add_m}
+</pre>
+The last line allows us to call add(something, else) and the compiler will figure out which of the three function is appropriate. The compiler enforces that the tensors we add are either 2 matrices with the same shape, or a vectors with the same length. Here a matrix multiplication:
+<pre>
+mul :: proc(a: ^M($ar, $ac), b: ^M(ac, $bc), o: ^M(ar, bc)) {
+    for r in 0..&ltar {
+        for c in 0..&ltbc {
+            for k in 0..&ltac {
+                o.data[r*bc+c] += a.data[r*ac+k] * b.data[k*bc+c]
+            }
+        }
+    }
+}
+</pre>
+This way if you try to do something stupid like this:
+<pre>
+a: M(10, 5)
+b: M(6, 3)
+o: M(10, 3)
+mul(a, b, o)
+</pre>
+The compiler can tell you that b is of the wrong size. If you change <code>M(6,3)</code> to <code>M(5,3)</code>, odin is happy. Here's what the <a href="https://pytorch.org/docs/stable/generated/torch.nn.Conv2d.html">conv2d</a> operations's check look like:
+<pre>
+conv2d :: proc(img: ^T($I,$R,$C), w: ^Q($O,I,$S,S), b: ^V(O), out: ^T(O, $OR, $OC), $stride: int) {
+    #assert(OR == (R-(S-1)-1)/stride+1, "Image, convolution and output width do not match")
+    #assert(OC == (C-(S-1)-1)/stride+1, "Image, convolution and output height do not match")
+    ...
+}
+</pre>
+
+<h2>Memory and reshaping</h2>
+<p>
+Since <code>M(4,4)</code> is practically an alias for 16 floats, we can trivially cast it to some other shape:
+</p>
+<pre>
+a := M(4,4)
+b := cast(^V(16))&M
+</pre>
+Now <code>b</code> is a pointer to <code>V(16)</code>, meaning that if you change <code>V.data</code> you also change <code>a.data</code>
+This allows us to other fun stuff, like take slices from a tensor:
+<pre>
+c := cast(^M(2,4))raw_data(M.data[8:])
+</pre>
+I've called those functions <code>as</code> and <code>get</code> in stml's source code.
+
+<h2>Training a model</h2>
+<a href="https://github.com/StanislavNikolov/stml/blob/main/assets/mnist_fc.py">Here's</a> an MLP in pytorch that trains in a couple of seconds. The core model is just 2 fully connected layers:
+<pre>
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.fc1 = nn.Linear(784, 20)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(20, 10)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        x = self.sigmoid(x)
+        return x
+</pre>
+
+Saving the weights so we can #load them from odin.
+<pre>
+net.fc1.weight.detach().numpy().tofile('fc_weights/fc1.weight.bin')
+net.fc1.bias  .detach().numpy().tofile('fc_weights/fc1.bias.bin')
+net.fc2.weight.detach().numpy().tofile('fc_weights/fc2.weight.bin')
+net.fc2.bias  .detach().numpy().tofile('fc_weights/fc2.bias.bin')
+</pre>
+
+<h2>Running the model with stml</h2>
+Odin has this nifty keyword <a href="https://odin-lang.org/docs/overview/#loadstring-path-or-loadstring-path-type">#load</a> that allows us to take any file and embed it into our program's code. This means I can have a single binary file that I give to people like <a href="https://github.com/Mozilla-Ocho/llamafile">llama file</a>. Notice that pytorch's linear layers have the weights transmuted, so the shape is (20, 784) and not (784, 20).
+<pre>
+fc1_weight := load(20, 784, "./assets/fc_weights/fc1.weight.bin")
+fc1_bias   := load( 1,  20, "./assets/fc_weights/fc1.bias.bin")
+fc2_weight := load(10,  20, "./assets/fc_weights/fc2.weight.bin")
+fc2_bias   := load( 1,  10, "./assets/fc_weights/fc2.bias.bin")
+</pre>
+
+Executing:
+<pre>
+hid1 := new(stml.M(1, 20))
+hid2 := new(stml.M(1, 10))
+
+stml.mulT(img,  fc1_weight, hid1) // img=^T(1,28,28)
+stml.add(hid1,  fc1_bias,   hid1)
+stml.relu_(hid1)
+stml.mulT(hid1, fc2_weight, hid2)
+stml.add(hid2,  fc2_bias,   hid2)
+stml.sigmoid_(hid2)
+</pre>
+
+
+</body>
+</html>
