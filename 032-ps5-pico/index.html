@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+	<title>TITLE</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+	<link rel="stylesheet" href="/style.css">
+</head>
+
+<body>
+<nav>
+    <a href="/">Posts</a>
+    <a href="/about">About me</a>
+</nav>
+
+<h1>PS5 doesn't like mouses</h1>
+I tried to get used to the controller with its cute thumb stick thingies but I just couldn't. Sadly my logitech mouse and keyboards do not pair with the console for some unknown reason, and even if I paired them I was devasted to learn that most games ignore them anyways. Still, I don't imagine that as far as the software is concerned both input device supply the computer with pretty much the same data. Delta x/y, button press, whatever. So I decided to build a device that translates the mouse and keyboard inputs to gamepad inputs.
+
+
+<pre>
+               Mouse data         Gamepad data
+┌──────────────────┐    ┌──────────────┐    ┌─────┐
+│ Mouse & Keyboard ├───►│ Magic device ├───►│ PS5 │
+└──────────────────┘    └──────────────┘    └─────┘
+</pre>
+
+<h1>Basic plan</h1>
+<p>
+I had a pico laying around that sounds like a perfect match for this job! Sadly it has only one USB (type C in my case) port, so I had to solder a second one. Also, since the RP2040 has just one USB peripheral, I had to use <a href="https://github.com/sekigon-gonnoc/Pico-PIO-USB">this project</a> that uses the mysterious PIO to emulate USB communication on GPIO pins. Then I bought a "connector" for $0.50 from the closest electronics and attached it to VBUS, GND, GPIO0 and GPIO1.
+</p>
+<p>
+I'm not experienced with soldering by any stretch of the imagination, but I believe this is the first project where I'm not ashamed by the wiring. My handy $10 battery powered iron from china helped too.
+</p>
+
+<h1>Debugging</h1>
+<p>
+But wait! If I use the "internal" USB to emulate a gamepad and the secondary USB to emulate a host that reads a mouse, how would I do my printf debugging? How will I <code>screen /dev/tty</code>? I know there is something called SWD that allows you to attach a second pico with a proper debugger, but this felt too complicated.
+</p>
+<p>
+I decided to buy one of those $2 OLED screen that you communicate over I²C with. The SSD1306 based one I got has a resolution of 128x64, which fits nicely around ~8 lines of text. I wrote a little function with the same signature as printf, but it internally uses something like a ring buffer. The first 8 logs go from top to bottom, and the ones after that "scroll" the text like in a normal terminal.
+</p>
+<pre>
+ssd1306_t disp;
+char logged[8][22];
+uint32_t logcnt = 0;
+void logstr(char *fmt, ...) {
+    va_list argptr;
+    va_start(argptr, fmt);
+    vsnprintf(logged[logcnt % 8], 22, fmt, argptr);
+    va_end(argptr);
+    logcnt += 1;
+
+    ssd1306_clear(&disp);
+    int offset = logcnt - 8;
+    if (offset < 0) offset = 0;
+    for (int i = 0;i < 8;i ++) {
+        int y = i * 8;
+        ssd1306_draw_string_with_font(&disp, 0, y, 1, font_8x5, logged[(i+offset)%8]);
+    }
+    ssd1306_show(&disp);
+}
+</pre>
+<p>
+As a bonus it also helped me test I was received all the HID mouse reports by simulating a little cursor that moves on the screen.
+</p>
+<video controls loop autoplay muted src="paint.mp4"></video>
+
+<h2>Testing</h2>
+<p>
+I plugged in my first version into my mac and testing it in a webbrowser. I was pleased to find out it was running very smoothly, although I had to stop drawing on the screen on every report by the mouse.
+</p>
+<video controls loop autoplay muted src="chrometest.mp4"></video>
+<p>
+You'll notice that chrome recognizes it as a dualshock controller. The reason is that tinyUSB requires me choose a vendor and product ids for my product and I copied the ones from the real controller I had. If I made up my own ids, the test still worked, but the test app did not render the nice 2d image, just a bunch of raw numbers.
+</p>
+
+<h2>Authentication</h2>
+<p>
+Sadly I'm not done. When I plug it into my PS5 nothing happens. After some research it looks like the PS5 does not want to work with unnoficial / unlicensed controllers. There is some alternate handshake, probably happending with CDC instead of HID. I haven't got the time to figure it out, but I image I can turn my real dualshock controller into an authenticator and my mouse as the actual source of data. Stay tuned!
+</p>
+
+</body>
+</html>
